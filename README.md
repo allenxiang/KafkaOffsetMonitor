@@ -1,7 +1,6 @@
 Kafka Offset Monitor
 ===========
-
-[![Build Status](https://travis-ci.org/quantifind/KafkaOffsetMonitor.svg?branch=master)](https://travis-ci.org/quantifind/KafkaOffsetMonitor)
+This is a heavily modified version of Kafka Offset Monitor forked from [here](https://github.com/quantifind/KafkaOffsetMonitor)
 
 This is an app to monitor your kafka consumers and their position (offset) in the queue.
 
@@ -29,27 +28,29 @@ History of Topic position
 Offset Types
 ===========
 
-Kafka is flexible on how the offsets are managed. Consumer can choose arbitrary storage and format to persist offsets.  KafkaOffsetMonitor currently 
-supports following popular storage formats
+Kafka is flexible on how the offsets are managed. Consumer can choose arbitrary storage and format to persist offsets. This forked version of KafkaOffsetMonitor currently 
+only supports kafka built-in offset management API (based on Kafka internal topic).
 
-* zookeeper built-in high-level consumer (based on Zookeeper)
-* kafka built-in offset management API (based on Kafka internal topic)
-* Storm Kafka Spout (based on Zookeeper by default)
+Secure Kafka Support
+===========
 
-Each runtime instance of KafkaOffsetMonitor can only support a single type of storage format.
+This forked version requires SSL connections.
 
 Running It
 ===========
 
-If you do not want to build it manually, just download the [current jar](https://github.com/quantifind/KafkaOffsetMonitor/releases/latest).
-
-This is a small webapp, you can run it locally or on a server, as long as you have access to the ZooKeeper nodes controlling kafka.
+This is a small webapp, you can run it locally or on a server, as long as you have access to the kafka nodes.
 
 ```
 java -cp KafkaOffsetMonitor-assembly-0.2.1.jar \
      com.quantifind.kafka.offsetapp.OffsetGetterWeb \
-     --offsetStorage kafka
-     --zk zk-server1,zk-server2 \
+     --kafkaBrokers localhost:9093 \
+     --kafkaSslKeystoreLocation ssl_keystore.jks
+     --kafkaSslKeystorePassword keysore_password
+     --kafkaSslKeystoreLocation ssl_keystore.jks
+     --kafkaSslKeyPassword key_password
+     --kafkaSslTruststoreLocation ssl_truststore.jks
+     --kafkaSslTruststorePassword ssl_truststore_password
      --port 8080 \
      --refresh 10.seconds \
      --retain 2.days
@@ -57,14 +58,11 @@ java -cp KafkaOffsetMonitor-assembly-0.2.1.jar \
 
 The arguments are:
 
-- **offsetStorage** valid options are ''zookeeper'', ''kafka'' or ''storm''. Anything else falls back to ''zookeeper''
-- **zk** the ZooKeeper hosts
 - **port** on what port will the app be available
 - **refresh** how often should the app refresh and store a point in the DB
 - **retain** how long should points be kept in the DB
 - **dbName** where to store the history (default 'offsetapp')
 - **kafkaOffsetForceFromStart** only applies to ''kafka'' format. Force KafkaOffsetMonitor to scan the commit messages from start (see notes below)
-- **stormZKOffsetBase** only applies to ''storm'' format.  Change the offset storage base in zookeeper, default to ''/stormconsumers'' (see notes below)
 - **pluginsArgs** additional arguments used by extensions (see below)
 
 Special Notes on Kafka Format
@@ -73,16 +71,6 @@ With Kafka built-in offset management API, offsets are saved in an internal topi
 to directly query existing consumers, KafkaOffsetMonitor needs to ''discover'' consumers by examining those ''commit'' messages.  If consumers are active, 
 KafkaOffsetMonitor could just listen to new ''commit'' messages and active consumers should be ''discovered'' after a short while.  If in case you want to 
 see the consumers without much load, you can use flag '''kafkaOffsetForceFromStart''' to scan all ''commit'' messages.
-
-Special Notes on Storm Storage
-===============================
-By default, Storm Kafka Spout stores offsets in ZK in a directory specified via ''SpoutConfig''. At same time, Kafka also stores its meta-data inside zookeeper. 
-In order to monitor Storm Kafka Spout offsets, KafkaOffsetMonitor requires that:
- 
- * Spout and Kafka use the same zookeeper cluster
- * Spout stores the offsets under a sub-directory of Kafka's meta-data directory 
-
-This sub-directory can be configured via ''stormZKOffsetBase''. The default value is ''/stormconsumers''
 
 Writing and using plugins
 ============================
@@ -108,7 +96,13 @@ Assuming you have a custom implementation of OffsetInfoReporter in a jar file, r
 ```
 java -cp KafkaOffsetMonitor-assembly-0.3.0.jar:kafka-offset-monitor-another-db-reporter.jar \
      com.quantifind.kafka.offsetapp.OffsetGetterWeb \
-     --zk zk-server1,zk-server2 \
+     --kafkaBrokers localhost:9093 \
+     --kafkaSslKeystoreLocation ssl_keystore.jks
+     --kafkaSslKeystorePassword keysore_password
+     --kafkaSslKeystoreLocation ssl_keystore.jks
+     --kafkaSslKeyPassword key_password
+     --kafkaSslTruststoreLocation ssl_truststore.jks
+     --kafkaSslTruststorePassword ssl_truststore_password
      --port 8080 \
      --refresh 10.seconds \
      --retain 2.days
@@ -116,12 +110,3 @@ java -cp KafkaOffsetMonitor-assembly-0.3.0.jar:kafka-offset-monitor-another-db-r
 ```
 
 For complete working example you can check [kafka-offset-monitor-graphite](https://github.com/allegro/kafka-offset-monitor-graphite), a plugin reporting offset information to Graphite.
-
-Contributing
-============
-
-The KafkaOffsetMonitor is released under the Apache License and we **welcome any contributions** within this license. Any pull request is welcome and will be reviewed and merged as quickly as possible.
-
-Because this open source tool is released by [Quantifind](http://www.quantifind.com) as a company, if you want to submit a pull request, you will have to sign the following simple contributors agreement:
-- If you are an individual, please sign [this contributors agreement](https://docs.google.com/a/quantifind.com/document/d/1RS7qEjq3cCmJ1665UhoCMK8541Ms7KyU3kVFoO4CR_I/) and send it back to contributors@quantifind.com
-- If you are contributing changes that you did as part of your work, please sign [this contributors agreement](https://docs.google.com/a/quantifind.com/document/d/1kNwLT4qG3G0Ct2mEuNdBGmKDYuApN1CpQtZF8TSVTjE/) and send it back to contributors@quantifind.com

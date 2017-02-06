@@ -6,13 +6,12 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 import com.quantifind.kafka.OffsetGetter
 import com.quantifind.kafka.OffsetGetter.KafkaInfo
 import com.quantifind.kafka.offsetapp.sqlite.SQLiteOffsetInfoReporter
+import com.quantifind.sumac.FieldArgs
 import com.quantifind.sumac.validation.Required
 import com.quantifind.utils.UnfilteredWebApp
-import com.quantifind.utils.Utils.retry
+import com.quantifind.utils.Utils.retryTask
 import com.twitter.util.Time
-import kafka.consumer.ConsumerConnector
 import kafka.utils.Logging
-import org.I0Itec.zkclient.ZkClient
 import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
 import org.json4s.{CustomSerializer, JInt, NoTypeHints}
@@ -23,117 +22,54 @@ import unfiltered.response.{JsonContent, Ok, ResponseString}
 
 import scala.collection.mutable
 import scala.concurrent.duration._
-import scala.util.control.NonFatal
+import scala.language.implicitConversions
+
+class OffsetGetterArgs extends FieldArgs {
+  var kafkaOffsetForceFromStart = false
+  var kafkaSecurityProtocol = "SSL"
+  @Required
+  var kafkaBrokers: String = _
+  @Required
+  var kafkaSslKeystoreLocation: String = _
+  @Required
+  var kafkaSslKeystorePassword: String = _
+  @Required
+  var kafkaSslKeyPassword: String = _
+  @Required
+  var kafkaSslTruststoreLocation: String = _
+  @Required
+  var kafkaSslTruststorePassword: String = _
+}
+
 
 class OWArgs extends OffsetGetterArgs with UnfilteredWebApp.Arguments {
+  lazy val db = new OffsetDB(dbName)
   @Required
   var retain: FiniteDuration = _
-
   @Required
   var refresh: FiniteDuration = _
-
   var dbName: String = "offsetapp"
-
-  lazy val db = new OffsetDB(dbName)
-
-  var pluginsArgs : String = _
+  var pluginsArgs: String = _
 }
 
 /**
- * A webapp to look at consumers managed by kafka and their offsets.
- * User: pierre
- * Date: 1/23/14
- */
+  * A webapp to look at consumers managed by kafka and their offsets.
+  * User: pierre
+  * Date: 1/23/14
+  */
 object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
+  implicit def funToRunnable(fun: () => Unit) = new Runnable() {
+    def run() = fun()
+  }
 
-  implicit def funToRunnable(fun: () => Unit) = new Runnable() { def run() = fun() }
+  val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(2)
+  var reporters: mutable.Set[OffsetInfoReporter] = null
 
   def htmlRoot: String = "/offsetapp"
 
-  val  scheduler : ScheduledExecutorService = Executors.newScheduledThreadPool(2)
-
-  var reporters: mutable.Set[OffsetInfoReporter] = null
-
-  def retryTask[T](fn: => T) {
-    try {
-      retry(3) {
-        fn
-      }
-    } catch {
-      case NonFatal(e) =>
-        error("Failed to run scheduled task", e)
-    }
-  }
-
-  def reportOffsets(args: OWArgs) {
-    val groups = getGroups(args)
-    groups.foreach {
-      g =>
-        val inf = getInfo(g, args).offsets.toIndexedSeq
-        info(s"reporting ${inf.size}")
-        reporters.foreach( reporter => retryTask { reporter.report(inf) } )
-    }
-  }
-
-  def schedule(args: OWArgs) {
-
-    scheduler.scheduleAtFixedRate( () => { reportOffsets(args) }, 0, args.refresh.toMillis, TimeUnit.MILLISECONDS )
-    scheduler.scheduleAtFixedRate( () => { reporters.foreach(reporter => retryTask({reporter.cleanupOldData()})) }, args.retain.toMillis, args.retain.toMillis, TimeUnit.MILLISECONDS )
-
-  }
-
-  def withOG[T](args: OWArgs)(f: OffsetGetter => T): T = {
-    var og: OffsetGetter = null
-    try {
-      og = OffsetGetter.getInstance(args)
-      f(og)
-    } finally {
-      if (og != null) og.close()
-    }
-  }
-
-  def getInfo(group: String, args: OWArgs): KafkaInfo = withOG(args) {
-    _.getInfo(group)
-  }
-
-  def getGroups(args: OWArgs) = withOG(args) {
-    _.getGroups
-  }
-
-  def getActiveTopics(args: OWArgs) = withOG(args) {
-    _.getActiveTopics
-  }
-  def getTopics(args: OWArgs) = withOG(args) {
-    _.getTopics
-  }
-
-  def getTopicDetail(topic: String, args: OWArgs) = withOG(args) {
-    _.getTopicDetail(topic)
-  }
-
-  def getTopicAndConsumersDetail(topic: String, args: OWArgs) = withOG(args) {
-    _.getTopicAndConsumersDetail(topic)
-  }
-
-  def getClusterViz(args: OWArgs) = withOG(args) {
-    _.getClusterViz
-  }
-
   override def afterStop() {
-
     scheduler.shutdown()
   }
-
-  class TimeSerializer extends CustomSerializer[Time](format => (
-    {
-      case JInt(s)=>
-        Time.fromMilliseconds(s.toLong)
-    },
-    {
-      case x: Time =>
-        JInt(x.inMilliseconds)
-    }
-    ))
 
   override def setup(args: OWArgs): Plan = new Plan {
     implicit val formats = Serialization.formats(NoTypeHints) + new TimeSerializer
@@ -165,18 +101,68 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     }
   }
 
+  def schedule(args: OWArgs) {
+    scheduler.scheduleAtFixedRate(() => {
+      reportOffsets(args)
+    }, 0, args.refresh.toMillis, TimeUnit.MILLISECONDS)
+    scheduler.scheduleAtFixedRate(() => {
+      reporters.foreach(reporter => retryTask({
+        reporter.cleanupOldData()
+      }))
+    }, args.retain.toMillis, args.retain.toMillis, TimeUnit.MILLISECONDS)
+  }
+
+  def reportOffsets(args: OWArgs) = withOG(args) {
+    _.reportOffsets(reporters)
+  }
+
+  def withOG[T](args: OWArgs)(f: OffsetGetter => T): T = {
+    var og: OffsetGetter = null
+    try {
+      og = OffsetGetter.getInstance(args)
+      f(og)
+    } finally {
+      if (og != null) og.close()
+    }
+  }
+
+  def getInfo(group: String, args: OWArgs): KafkaInfo = withOG(args) {
+    _.getInfo(group)
+  }
+
+  def getGroups(args: OWArgs) = withOG(args) {
+    _.getGroups
+  }
+
+  def getActiveTopics(args: OWArgs) = withOG(args) {
+    _.getActiveTopics
+  }
+
+  def getTopics(args: OWArgs) = withOG(args) {
+    _.getTopics
+  }
+
+  def getTopicDetail(topic: String, args: OWArgs) = withOG(args) {
+    _.getTopicDetail(topic)
+  }
+
+  def getTopicAndConsumersDetail(topic: String, args: OWArgs) = withOG(args) {
+    _.getTopicAndConsumersDetail(topic)
+  }
+
+  def getClusterViz(args: OWArgs) = withOG(args) {
+    _.getClusterViz
+  }
+
   def createOffsetInfoReporters(args: OWArgs) = {
-
     val reflections = new Reflections()
-
     val reportersTypes: java.util.Set[Class[_ <: OffsetInfoReporter]] = reflections.getSubTypesOf(classOf[OffsetInfoReporter])
-
     val reportersSet: mutable.Set[Class[_ <: OffsetInfoReporter]] = scala.collection.JavaConversions.asScalaSet(reportersTypes)
 
     // SQLiteOffsetInfoReporter as a main storage is instantiated explicitly outside this loop so it is filtered out
     reportersSet
       .filter(!_.equals(classOf[SQLiteOffsetInfoReporter]))
-      .map((reporterType: Class[_ <: OffsetInfoReporter]) =>  createReporterInstance(reporterType, args.pluginsArgs))
+      .map((reporterType: Class[_ <: OffsetInfoReporter]) => createReporterInstance(reporterType, args.pluginsArgs))
       .+(new SQLiteOffsetInfoReporter(argHolder.db, args))
   }
 
@@ -184,4 +170,13 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     val constructor: Constructor[_ <: OffsetInfoReporter] = reporterClass.getConstructor(classOf[String])
     constructor.newInstance(rawArgs)
   }
+
+  class TimeSerializer extends CustomSerializer[Time](format => ( {
+    case JInt(s) =>
+      Time.fromMilliseconds(s.toLong)
+  }, {
+    case x: Time =>
+      JInt(x.inMilliseconds)
+  }
+  ))
 }

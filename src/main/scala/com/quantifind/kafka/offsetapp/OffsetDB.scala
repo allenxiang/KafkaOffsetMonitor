@@ -1,56 +1,29 @@
 package com.quantifind.kafka.offsetapp
 
-import scala.slick.driver.SQLiteDriver.simple._
-import scala.slick.jdbc.meta.MTable
-
 import com.quantifind.kafka.OffsetGetter.OffsetInfo
 import com.quantifind.kafka.offsetapp.OffsetDB.{DbOffsetInfo, OffsetHistory, OffsetPoints}
 import com.twitter.util.Time
 
+import scala.slick.driver.SQLiteDriver.simple._
+import scala.slick.jdbc.meta.MTable
+
 /**
- * Tools to store offsets in a DB
- * User: andrews
- * Date: 1/27/14
- */
+  * Tools to store offsets in a DB
+  * User: andrews
+  * Date: 1/27/14
+  */
 class OffsetDB(dbfile: String) {
 
   val database = Database.forURL(s"jdbc:sqlite:$dbfile.db",
     driver = "org.sqlite.JDBC")
 
   implicit val twitterTimeMap = MappedColumnType.base[Time, Long](
-  {
-    time => time.inMillis
-  }, {
-    millis => Time.fromMilliseconds(millis)
-  }
+    {
+      time => time.inMillis
+    }, {
+      millis => Time.fromMilliseconds(millis)
+    }
   )
-
-  class Offset(tag: Tag) extends Table[DbOffsetInfo](tag, "OFFSETS") {
-    def id = column[Int]("id", O.PrimaryKey, O.AutoInc)
-
-    val group = column[String]("group")
-    val topic = column[String]("topic")
-    val partition = column[Int]("partition")
-    val offset = column[Long]("offset")
-    val logSize = column[Long]("log_size")
-    val owner = column[Option[String]]("owner")
-    val timestamp = column[Long]("timestamp")
-    val creation = column[Time]("creation")
-    val modified = column[Time]("modified")
-
-
-    def * = (id.?, group, topic, partition, offset, logSize, owner, timestamp, creation, modified).shaped <>(DbOffsetInfo.parse, DbOffsetInfo.unparse)
-
-    def forHistory = (timestamp, partition, owner, offset, logSize) <>(OffsetPoints.tupled, OffsetPoints.unapply)
-
-    def idx = index("idx_search", (group, topic))
-
-    def tidx = index("idx_time", (timestamp))
-
-    def uidx = index("idx_unique", (group, topic, partition, timestamp), unique = true)
-
-  }
-
   val offsets = TableQuery[Offset]
 
   def insert(timestamp: Long, info: OffsetInfo) {
@@ -71,27 +44,52 @@ class OffsetDB(dbfile: String) {
   def emptyOld(since: Long) {
     database.withSession {
       implicit s =>
-        offsets.where(_.timestamp < since).delete
+        offsets.filter(_.timestamp < since).delete
     }
   }
 
   def offsetHistory(group: String, topic: String): OffsetHistory = database.withSession {
     implicit s =>
       val o = offsets
-        .where(off => off.group === group && off.topic === topic)
+        .filter(off => off.group === group && off.topic === topic)
         .sortBy(_.timestamp)
         .map(_.forHistory)
-        .list()
+        .list
       OffsetHistory(group, topic, o)
   }
 
   def maybeCreate() {
     database.withSession {
       implicit s =>
-        if (MTable.getTables("OFFSETS").list().isEmpty) {
+        if (MTable.getTables("OFFSETS").list.isEmpty) {
           offsets.ddl.create
         }
     }
+  }
+
+  class Offset(tag: Tag) extends Table[DbOffsetInfo](tag, "OFFSETS") {
+    val group = column[String]("group")
+    val topic = column[String]("topic")
+    val partition = column[Int]("partition")
+    val offset = column[Long]("offset")
+    val logSize = column[Long]("log_size")
+    val owner = column[Option[String]]("owner")
+    val timestamp = column[Long]("timestamp")
+    val creation = column[Time]("creation")
+    val modified = column[Time]("modified")
+
+    def * = (id.?, group, topic, partition, offset, logSize, owner, timestamp, creation, modified).shaped <> (DbOffsetInfo.parse, DbOffsetInfo.unparse)
+
+    def id = column[Int]("id", O.PrimaryKey, O.AutoInc)
+
+    def forHistory = (timestamp, partition, owner, offset, logSize) <> (OffsetPoints.tupled, OffsetPoints.unapply)
+
+    def idx = index("idx_search", (group, topic))
+
+    def tidx = index("idx_time", (timestamp))
+
+    def uidx = index("idx_unique", (group, topic, partition, timestamp), unique = true)
+
   }
 
 }
