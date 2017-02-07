@@ -105,11 +105,12 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     scheduler.scheduleAtFixedRate(() => {
       reportOffsets(args)
     }, 0, args.refresh.toMillis, TimeUnit.MILLISECONDS)
+
     scheduler.scheduleAtFixedRate(() => {
       reporters.foreach(reporter => retryTask({
         reporter.cleanupOldData()
       }))
-    }, args.retain.toMillis, args.retain.toMillis, TimeUnit.MILLISECONDS)
+    }, TimeUnit.HOURS.toMillis(1), TimeUnit.HOURS.toMillis(1), TimeUnit.MILLISECONDS)
   }
 
   def reportOffsets(args: OWArgs) = withOG(args) {

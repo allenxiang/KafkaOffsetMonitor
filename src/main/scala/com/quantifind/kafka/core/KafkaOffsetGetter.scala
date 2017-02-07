@@ -32,20 +32,20 @@ class KafkaOffsetGetter extends OffsetGetter {
   import KafkaOffsetGetter._
 
   override def getOffsetInfoByTopic(group: String, topic: String): Seq[OffsetInfo] = {
-    val partitionInfoList: util.List[PartitionInfo] = topicPartitionsMap.get(topic)
-    if (null == partitionInfoList)
-      Seq()
-    else {
-      val offsetInfoSeq = scala.collection.JavaConversions.asScalaIterator(topicPartitionsMap.get(topic).iterator()).map(partitionInfo => {
-        val topicPartition = new TopicPartition(topic, partitionInfo.partition)
-        val offsetMetaData = committedOffsetMap.get(GroupTopicPartition(group, topicPartition))
+    val partitionInfoList: Option[util.List[PartitionInfo]] = topicPartitionsMap.get(topic)
+    partitionInfoList match {
+      case None => Seq()
+      case Some(partitionInfoListValue) =>
+        val offsetInfoSeq = partitionInfoListValue.map(partitionInfo => {
+          val topicPartition = new TopicPartition(topic, partitionInfo.partition)
+          val offsetMetaData = committedOffsetMap.get(GroupTopicPartition(group, topicPartition))
 
-        offsetMetaData match {
-          case None => None
-          case Some(offsetMetaDataValue) =>
-            getOffsetInfoByPartition(GroupTopicPartition(group, topicPartition), offsetMetaDataValue)
-        }
-      }).flatten.toSeq
+          offsetMetaData match {
+            case None => None
+            case Some(offsetMetaDataValue) =>
+              getOffsetInfoByPartition(GroupTopicPartition(group, topicPartition), offsetMetaDataValue)
+          }
+        }).flatten
 
       offsetInfoSeq
     }
@@ -97,11 +97,11 @@ class KafkaOffsetGetter extends OffsetGetter {
   }
 
   override def getTopics: Seq[String] = {
-    scala.collection.JavaConversions.asScalaIterator(topicPartitionsMap.keySet().iterator()).toSeq.sorted
+    topicPartitionsMap.keys.toSeq.sorted
   }
 
   override def getClusterViz: Node = {
-    val clusterNodes = scala.collection.JavaConversions.mapAsScalaMap(topicPartitionsMap).values.map(partition => {
+    val clusterNodes = topicPartitionsMap.values.map(partition => {
       Node(partition.get(0).leader().host() + ":" + partition.get(0).leader().port(), Seq())
     }).toSet.toSeq.sortWith(_.name < _.name)
     Node("KafkaCluster", clusterNodes)
@@ -119,8 +119,8 @@ class KafkaOffsetGetter extends OffsetGetter {
 
   override def getBrokerInfo(topics: Seq[String]): Iterable[BrokerInfo] = {
     for {
-      partitions: util.List[PartitionInfo] <- JavaConversions.mapAsScalaMap(topicPartitionsMap).retain((k, v) => topics.contains(k)).values
-      partition: PartitionInfo <- JavaConversions.iterableAsScalaIterable(partitions)
+      partitions: util.List[PartitionInfo] <- topicPartitionsMap.filterKeys(topics.contains(_)).values
+      partition: PartitionInfo <- partitions
     } yield BrokerInfo(id = partition.leader.id, host = partition.leader.host, port = partition.leader.port)
   }
 }
@@ -129,10 +129,11 @@ object KafkaOffsetGetter extends Logging {
   val committedOffsetMap: concurrent.Map[GroupTopicPartition, OffsetAndMetadata] = concurrent.TrieMap()
 
   //For these vars, we swap the whole object when update is needed. Should be thread safe.
-  var topicAndGroups: mutable.Set[TopicAndGroup] = mutable.HashSet()
-  var clients: mutable.Set[ClientGroup] = mutable.HashSet()
-  var topicPartitionOffsetsMap: mutable.Map[TopicPartition, Long] = mutable.HashMap()
-  var topicPartitionsMap: util.Map[String, util.List[PartitionInfo]] = new util.HashMap[String, util.List[PartitionInfo]]();
+  var topicAndGroups: immutable.Set[TopicAndGroup] = immutable.HashSet()
+  var clients: immutable.Set[ClientGroup] = immutable.HashSet()
+  var activeTopicPartitions: immutable.Set[TopicPartition] = immutable.HashSet()
+  var topicPartitionOffsetsMap: immutable.Map[TopicPartition, Long] = immutable.HashMap()
+  var topicPartitionsMap: immutable.Map[String, util.List[PartitionInfo]] = immutable.HashMap()
 
   def startCommittedOffsetListener(args: OffsetGetterArgs) = {
     var offsetConsumer: KafkaConsumer[Array[Byte], Array[Byte]] = null;
@@ -204,10 +205,11 @@ object KafkaOffsetGetter extends Logging {
           if (null == adminClient) {
             adminClient = createNewAdminClient(args)
           }
-          val groupOverviews = adminClient.listAllConsumerGroupsFlattened()
+          val groupOverviews: Seq[GroupOverview] = adminClient.listAllConsumerGroupsFlattened()
 
           val newTopicAndGroups: mutable.Set[TopicAndGroup] = mutable.HashSet()
           val newClients: mutable.Set[ClientGroup] = mutable.HashSet()
+          val newActiveTopicPartitions: mutable.HashSet[TopicPartition] = mutable.HashSet()
 
           groupOverviews.foreach((groupOverview: GroupOverview) => {
             val groupId = groupOverview.groupId;
@@ -216,23 +218,25 @@ object KafkaOffsetGetter extends Logging {
             consumerGroupSummary match {
               case None =>
               case Some(consumerGroupSummaryValue) =>
-                consumerGroupSummaryValue.foreach((consumerSummary) => {
+                consumerGroupSummaryValue.foreach(consumerSummary => {
                   val clientId = consumerSummary.clientId
                   val clientHost = consumerSummary.clientHost
 
                   val topicPartitions: List[TopicPartition] = consumerSummary.assignment
 
-                  topicPartitions.map(topicPartition =>
+                  topicPartitions.foreach(topicPartition => {
+                    newActiveTopicPartitions += topicPartition
                     newTopicAndGroups += TopicAndGroup(topicPartition.topic(), groupId)
-                  )
+                  })
 
                   newClients += ClientGroup(groupId, clientId, clientHost, topicPartitions.toSet)
                 })
             }
           })
 
-          topicAndGroups = newTopicAndGroups
-          clients = newClients
+          activeTopicPartitions = newActiveTopicPartitions.toSet
+          topicAndGroups = newTopicAndGroups.toSet
+          clients = newClients.toSet
 
           info("Retrieved consumer group overviews: " + groupOverviews.size)
         }
@@ -265,16 +269,13 @@ object KafkaOffsetGetter extends Logging {
           }
 
           info("Retrieving topics")
-          topicPartitionsMap = topicPartitionOffsetGetter.listTopics
+          topicPartitionsMap = JavaConversions.mapAsScalaMap(topicPartitionOffsetGetter.listTopics).toMap
           info("Retrieved topics: " + topicPartitionsMap.size )
 
-          val distinctTopicPartitions: List[TopicPartition] = topicPartitionsMap.values().flatMap(partitionInfoList =>
-            partitionInfoList.map( partInfo => new TopicPartition(partInfo.topic, partInfo.partition))).toList
-
           info("Retrieving partition offsets")
-          topicPartitionOffsetsMap = topicPartitionOffsetGetter.endOffsets(distinctTopicPartitions).map(kv => {
+          topicPartitionOffsetsMap = topicPartitionOffsetGetter.endOffsets(activeTopicPartitions).map(kv => {
             (kv._1, kv._2.toLong)
-          })
+          }).toMap
 
           info("Retrieved partition offsets: " + topicPartitionOffsetsMap.size)
         }
