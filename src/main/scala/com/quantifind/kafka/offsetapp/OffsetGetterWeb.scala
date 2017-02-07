@@ -110,7 +110,7 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
       reporters.foreach(reporter => retryTask({
         reporter.cleanupOldData()
       }))
-    }, TimeUnit.HOURS.toMillis(1), TimeUnit.HOURS.toMillis(1), TimeUnit.MILLISECONDS)
+    }, 0, TimeUnit.MINUTES.toMillis(10), TimeUnit.MILLISECONDS)
   }
 
   def reportOffsets(args: OWArgs) = withOG(args) {

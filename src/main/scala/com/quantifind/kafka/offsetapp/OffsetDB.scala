@@ -1,5 +1,7 @@
 package com.quantifind.kafka.offsetapp
 
+import java.util.concurrent.TimeUnit
+
 import com.quantifind.kafka.OffsetGetter.OffsetInfo
 import com.quantifind.kafka.offsetapp.OffsetDB.{DbOffsetInfo, OffsetHistory, OffsetPoints}
 import com.twitter.util.Time
@@ -16,6 +18,8 @@ class OffsetDB(dbfile: String) {
 
   val database = Database.forURL(s"jdbc:sqlite:$dbfile.db",
     driver = "org.sqlite.JDBC")
+
+  var lastCleanUp: Long = 0L
 
   implicit val twitterTimeMap = MappedColumnType.base[Time, Long](
     {
@@ -41,10 +45,25 @@ class OffsetDB(dbfile: String) {
     }
   }
 
+  // Delete records that are too old.
   def emptyOld(since: Long) {
     database.withSession {
       implicit s =>
         offsets.filter(_.timestamp < since).delete
+    }
+  }
+
+  // Clean up old data and keep 1 record out of every 6 records.
+  def cleanupOld(since: Long, refreshInterval: Long) {
+    database.withSession {
+      implicit s =>
+        if (lastCleanUp == 0 ) {
+          offsets.filter(_.timestamp < since).filter(_.timestamp % (refreshInterval * 6) >= refreshInterval).delete
+        }
+        else {
+          offsets.filter(_.timestamp < since).filter(_.timestamp > lastCleanUp).filter(_.timestamp % (refreshInterval * 6) >= refreshInterval).delete
+        }
+        lastCleanUp = since
     }
   }
 
@@ -95,7 +114,6 @@ class OffsetDB(dbfile: String) {
 }
 
 object OffsetDB {
-
   case class OffsetPoints(timestamp: Long, partition: Int, owner: Option[String], offset: Long, logSize: Long)
 
   case class OffsetHistory(group: String, topic: String, offsets: Seq[OffsetPoints])

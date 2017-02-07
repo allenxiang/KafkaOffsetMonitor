@@ -18,11 +18,10 @@ import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRecord, Consum
 import org.apache.kafka.common.config.SslConfigs
 import org.apache.kafka.common.{PartitionInfo, TopicPartition}
 
-import scala.collection.{JavaConversions, _}
 import scala.collection.JavaConversions._
+import scala.collection.{JavaConversions, _}
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
-
+import scala.concurrent.{Await, Future, duration}
 
 /**
   * Created by rcasey on 11/16/2016.
@@ -273,15 +272,24 @@ object KafkaOffsetGetter extends Logging {
           info("Retrieved topics: " + topicPartitionsMap.size )
 
           info("Retrieving partition offsets")
-          topicPartitionOffsetsMap = topicPartitionOffsetGetter.endOffsets(activeTopicPartitions).map(kv => {
-            (kv._1, kv._2.toLong)
-          }).toMap
+
+          val f = Future {
+            topicPartitionOffsetsMap = topicPartitionOffsetGetter.endOffsets(activeTopicPartitions).map(kv => {
+              (kv._1, kv._2.toLong)
+            }).toMap
+          }
+
+          Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
 
           info("Retrieved partition offsets: " + topicPartitionOffsetsMap.size)
         }
         catch {
           case e: Throwable =>
             error("Error occurred while retrieving topic partition offsets.", e)
+            if (null != topicPartitionOffsetGetter) {
+              topicPartitionOffsetGetter.close
+              topicPartitionOffsetGetter = null
+            }
         }
 
         Thread.sleep(sleepOnDataRetrieval)
