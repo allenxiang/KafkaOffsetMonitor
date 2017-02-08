@@ -310,11 +310,13 @@ object KafkaOffsetGetter extends Logging {
     props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, if (args.kafkaOffsetForceFromStart) "earliest" else "latest")
 
     props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, args.kafkaSecurityProtocol)
-    props.put(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, args.kafkaSslKeystoreLocation)
-    props.put(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, args.kafkaSslKeystorePassword)
-    props.put(SslConfigs.SSL_KEY_PASSWORD_CONFIG, args.kafkaSslKeyPassword)
-    props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, args.kafkaSslTruststoreLocation)
-    props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, args.kafkaSslTruststorePassword)
+    if (args.kafkaSecurityProtocol.equals("SSL")) {
+      props.put(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, args.kafkaSslKeystoreLocation)
+      props.put(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, args.kafkaSslKeystorePassword)
+      props.put(SslConfigs.SSL_KEY_PASSWORD_CONFIG, args.kafkaSslKeyPassword)
+      props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, args.kafkaSslTruststoreLocation)
+      props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, args.kafkaSslTruststorePassword)
+    }
 
     while (null == kafkaConsumer) {
       try {
@@ -344,11 +346,13 @@ object KafkaOffsetGetter extends Logging {
     val props: Properties = new Properties
     props.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, args.kafkaBrokers)
     props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, args.kafkaSecurityProtocol)
-    props.put(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, args.kafkaSslKeystoreLocation)
-    props.put(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, args.kafkaSslKeystorePassword)
-    props.put(SslConfigs.SSL_KEY_PASSWORD_CONFIG, args.kafkaSslKeyPassword)
-    props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, args.kafkaSslTruststoreLocation)
-    props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, args.kafkaSslTruststorePassword)
+    if (args.kafkaSecurityProtocol.equals("SSL")) {
+      props.put(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, args.kafkaSslKeystoreLocation)
+      props.put(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, args.kafkaSslKeystorePassword)
+      props.put(SslConfigs.SSL_KEY_PASSWORD_CONFIG, args.kafkaSslKeyPassword)
+      props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, args.kafkaSslTruststoreLocation)
+      props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, args.kafkaSslTruststorePassword)
+    }
 
     while (null == adminClient) {
       try {

@@ -23,6 +23,7 @@ libraryDependencies ++= Seq(
 
 assemblyMergeStrategy in assembly := {
   case "about.html" => MergeStrategy.discard
+  case "log4j.properties" => MergeStrategy.discard
   case x => {
     val oldStrategy = (assemblyMergeStrategy in assembly).value
     oldStrategy(x)

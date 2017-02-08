@@ -1,6 +1,9 @@
 package com.quantifind.kafka.offsetapp
 
+import java.io.FileInputStream
 import java.lang.reflect.Constructor
+import java.net.URL
+import java.util.Properties
 import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 import com.quantifind.kafka.OffsetGetter
@@ -11,6 +14,7 @@ import com.quantifind.sumac.validation.Required
 import com.quantifind.utils.UnfilteredWebApp
 import com.quantifind.utils.Utils.retryTask
 import com.twitter.util.Time
+import com.typesafe.config.ConfigFactory
 import kafka.utils.Logging
 import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
@@ -27,17 +31,13 @@ import scala.language.implicitConversions
 class OffsetGetterArgs extends FieldArgs {
   var kafkaOffsetForceFromStart = false
   var kafkaSecurityProtocol = "SSL"
+  var kafkaSslPropertyFile: String = _
   @Required
   var kafkaBrokers: String = _
-  @Required
   var kafkaSslKeystoreLocation: String = _
-  @Required
   var kafkaSslKeystorePassword: String = _
-  @Required
   var kafkaSslKeyPassword: String = _
-  @Required
   var kafkaSslTruststoreLocation: String = _
-  @Required
   var kafkaSslTruststorePassword: String = _
 }
 
@@ -72,6 +72,22 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
   }
 
   override def setup(args: OWArgs): Plan = new Plan {
+    if (args.kafkaSslPropertyFile != null) {
+      try {
+        val prop = new Properties()
+        prop.load(new FileInputStream(args.kafkaSslPropertyFile))
+        if (prop.getProperty("security.protocol") != null) args.kafkaSecurityProtocol = prop.getProperty("security.protocol")
+        if (prop.getProperty("ssl.keystore.location") != null) args.kafkaSslKeystoreLocation = prop.getProperty("ssl.keystore.location")
+        if (prop.getProperty("ssl.keystore.password") != null) args.kafkaSslKeystorePassword = prop.getProperty("ssl.keystore.password")
+        if (prop.getProperty("ssl.key.password") != null) args.kafkaSslKeyPassword = prop.getProperty("ssl.key.password")
+        if (prop.getProperty("ssl.truststore.location") != null) args.kafkaSslTruststoreLocation = prop.getProperty("ssl.truststore.location")
+        if (prop.getProperty("ssl.truststore.password") != null) args.kafkaSslTruststorePassword = prop.getProperty("ssl.truststore.password")
+      } catch {
+        case e: Exception =>
+          error("Error loading property file: " + args.kafkaSslPropertyFile, e)
+      }
+    }
+
     implicit val formats = Serialization.formats(NoTypeHints) + new TimeSerializer
     args.db.maybeCreate()
 
