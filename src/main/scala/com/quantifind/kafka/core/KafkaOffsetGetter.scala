@@ -135,25 +135,37 @@ object KafkaOffsetGetter extends Logging {
   var topicPartitionsMap: immutable.Map[String, util.List[PartitionInfo]] = immutable.HashMap()
 
   def startCommittedOffsetListener(args: OffsetGetterArgs) = {
-    val sleepOnDataRetrieval: Int = 2000
     var offsetConsumer: KafkaConsumer[Array[Byte], Array[Byte]] = null;
 
-    if (null == offsetConsumer) {
+    while (null == offsetConsumer) {
       info("Creating new Kafka Client to get consumer group committed offsets")
 
       val group: String = "kafka-offset-getter-client-" + System.currentTimeMillis
       val consumerOffsetTopic = "__consumer_offsets"
-
       offsetConsumer = createNewKafkaConsumer(args, group)
-      offsetConsumer.subscribe(Arrays.asList(consumerOffsetTopic))
+
+      try {
+        val f = Future {
+          offsetConsumer.subscribe(Arrays.asList(consumerOffsetTopic))
+        }
+
+        Await.result(f, duration.pairIntToDuration(10, duration.SECONDS))
+        info("Subscribed to " + consumerOffsetTopic)
+      }
+      catch {
+        case e: Throwable =>
+          error("Error subscribing to consumer groups.", e)
+          offsetConsumer.close
+          offsetConsumer = null
+      }
     }
 
     Future {
       while (true) {
-        info("Pulling consumer group committed offsets")
+        debug("Pulling consumer group committed offsets")
         val records: ConsumerRecords[Array[Byte], Array[Byte]] = offsetConsumer.poll(100)
 
-        info("Consumer group committed offsets pulled: " + records.count)
+        debug("Consumer group committed offsets pulled: " + records.count)
         if (0 != records.count) {
           val iter = records.iterator()
           while (iter.hasNext()) {
@@ -173,7 +185,7 @@ object KafkaOffsetGetter extends Logging {
                     val topic: String = gtp.topicPartition.topic
                     val partition: Long = gtp.topicPartition.partition
                     val offset: Long = offsetAndMetadata.offset
-                    logger.info(s"Updating committed offset: g:$group,t:$topic,p:$partition: $offset")
+                    debug(s"Updating committed offset: g:$group,t:$topic,p:$partition: $offset")
 
                     committedOffsetMap += (gtp -> offsetAndMetadata)
                   }
@@ -187,8 +199,6 @@ object KafkaOffsetGetter extends Logging {
             }
           }
         }
-
-        Thread.sleep(sleepOnDataRetrieval)
       }
     }
   }
@@ -282,7 +292,7 @@ object KafkaOffsetGetter extends Logging {
             val f = Future {
               topicPartitionOffsetGetter.assign(activeTopicPartitions)
             }
-            Await.result(f, duration.pairIntToDuration(1, duration.SECONDS))
+            Await.result(f, duration.pairIntToDuration(10, duration.SECONDS))
 
             topicPartitionOffsetGetter.seekToEnd(new util.ArrayList[TopicPartition]())
 
@@ -290,10 +300,11 @@ object KafkaOffsetGetter extends Logging {
 
             activeTopicPartitions.foreach( topicPartition => {
               val f = Future {
+                debug("Retrieving partition offsets for " + topicPartition.topic + " " + topicPartition.partition)
                 val parititionOffset = topicPartitionOffsetGetter.position(topicPartition)
                 newTopicPartitionOffsetsMap.put(topicPartition, parititionOffset)
               }
-              Await.result(f, duration.pairIntToDuration(1, duration.SECONDS))
+              Await.result(f, duration.pairIntToDuration(10, duration.SECONDS))
             })
 
             topicPartitionOffsetsMap = newTopicPartitionOffsetsMap.toMap
