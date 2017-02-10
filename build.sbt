@@ -7,6 +7,8 @@ scalacOptions ++= Seq("-deprecation", "-unchecked", "-optimize", "-feature")
 
 mainClass in Compile := Some("com.quantifind.kafka.offsetapp.OffsetGetterWeb")
 
+packAutoSettings
+
 libraryDependencies ++= Seq(
   "log4j" % "log4j" % "1.2.17",
   "net.databinder" %% "unfiltered-filter" % "0.8.4",

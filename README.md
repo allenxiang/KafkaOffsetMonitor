@@ -45,12 +45,7 @@ This is a small webapp, you can run it locally or on a server, as long as you ha
 java -cp KafkaOffsetMonitor-assembly-0.2.1.jar \
      com.quantifind.kafka.offsetapp.OffsetGetterWeb \
      --kafkaBrokers localhost:9093 \
-     --kafkaSslKeystoreLocation ssl_keystore.jks
-     --kafkaSslKeystorePassword keysore_password
-     --kafkaSslKeystoreLocation ssl_keystore.jks
-     --kafkaSslKeyPassword key_password
-     --kafkaSslTruststoreLocation ssl_truststore.jks
-     --kafkaSslTruststorePassword ssl_truststore_password
+     --kafkaSslPropertyFile client.config \
      --port 8080 \
      --refresh 10.seconds \
      --retain 2.days
@@ -97,12 +92,7 @@ Assuming you have a custom implementation of OffsetInfoReporter in a jar file, r
 java -cp KafkaOffsetMonitor-assembly-0.3.0.jar:kafka-offset-monitor-another-db-reporter.jar \
      com.quantifind.kafka.offsetapp.OffsetGetterWeb \
      --kafkaBrokers localhost:9093 \
-     --kafkaSslKeystoreLocation ssl_keystore.jks
-     --kafkaSslKeystorePassword keysore_password
-     --kafkaSslKeystoreLocation ssl_keystore.jks
-     --kafkaSslKeyPassword key_password
-     --kafkaSslTruststoreLocation ssl_truststore.jks
-     --kafkaSslTruststorePassword ssl_truststore_password
+     --kafkaSslPropertyFile client.config \
      --port 8080 \
      --refresh 10.seconds \
      --retain 2.days

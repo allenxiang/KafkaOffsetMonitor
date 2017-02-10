@@ -149,7 +149,7 @@ object KafkaOffsetGetter extends Logging {
           offsetConsumer.subscribe(Arrays.asList(consumerOffsetTopic))
         }
 
-        Await.result(f, duration.pairIntToDuration(10, duration.SECONDS))
+        Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
         info("Subscribed to " + consumerOffsetTopic)
       }
       catch {
@@ -292,7 +292,7 @@ object KafkaOffsetGetter extends Logging {
             val f = Future {
               topicPartitionOffsetGetter.assign(activeTopicPartitions)
             }
-            Await.result(f, duration.pairIntToDuration(10, duration.SECONDS))
+            Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
 
             topicPartitionOffsetGetter.seekToEnd(new util.ArrayList[TopicPartition]())
 
@@ -304,7 +304,7 @@ object KafkaOffsetGetter extends Logging {
                 val parititionOffset = topicPartitionOffsetGetter.position(topicPartition)
                 newTopicPartitionOffsetsMap.put(topicPartition, parititionOffset)
               }
-              Await.result(f, duration.pairIntToDuration(10, duration.SECONDS))
+              Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
             })
 
             topicPartitionOffsetsMap = newTopicPartitionOffsetsMap.toMap
