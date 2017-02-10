@@ -34,6 +34,7 @@ class OffsetGetterArgs extends FieldArgs {
   var kafkaSslPropertyFile: String = _
   @Required
   var kafkaBrokers: String = _
+  var kafkaRequestTimeout: FiniteDuration = 5.minute
   var kafkaSslKeystoreLocation: String = _
   var kafkaSslKeystorePassword: String = _
   var kafkaSslKeyPassword: String = _
