@@ -46,7 +46,7 @@ class KafkaOffsetGetter extends OffsetGetter {
           }
         }).flatten
 
-      offsetInfoSeq
+        offsetInfoSeq
     }
   }
 
@@ -125,6 +125,7 @@ class KafkaOffsetGetter extends OffsetGetter {
 }
 
 object KafkaOffsetGetter extends Logging {
+  val kafkaClientRequestTimeout = duration.pairIntToDuration(10, duration.SECONDS)
   val committedOffsetMap: concurrent.Map[GroupTopicPartition, OffsetAndMetadata] = concurrent.TrieMap()
 
   //For these vars, we swap the whole object when update is needed. Should be thread safe.
@@ -136,20 +137,20 @@ object KafkaOffsetGetter extends Logging {
 
   def startCommittedOffsetListener(args: OffsetGetterArgs) = {
     var offsetConsumer: KafkaConsumer[Array[Byte], Array[Byte]] = null;
+    val consumerOffsetTopic = "__consumer_offsets"
 
     while (null == offsetConsumer) {
       info("Creating new Kafka Client to get consumer group committed offsets")
 
       val group: String = "kafka-offset-getter-client-" + System.currentTimeMillis
-      val consumerOffsetTopic = "__consumer_offsets"
       offsetConsumer = createNewKafkaConsumer(args, group)
 
       try {
         val f = Future {
           offsetConsumer.subscribe(Arrays.asList(consumerOffsetTopic))
         }
+        Await.result(f, kafkaClientRequestTimeout)
 
-        Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
         info("Subscribed to " + consumerOffsetTopic)
       }
       catch {
@@ -160,43 +161,41 @@ object KafkaOffsetGetter extends Logging {
       }
     }
 
-    Future {
-      while (true) {
-        debug("Pulling consumer group committed offsets")
-        val records: ConsumerRecords[Array[Byte], Array[Byte]] = offsetConsumer.poll(100)
+    while (true) {
+      debug("Pulling consumer group committed offsets")
+      val records: ConsumerRecords[Array[Byte], Array[Byte]] = offsetConsumer.poll(100)
 
-        debug("Consumer group committed offsets pulled: " + records.count)
-        if (0 != records.count) {
-          val iter = records.iterator()
-          while (iter.hasNext()) {
-            val record: ConsumerRecord[Array[Byte], Array[Byte]] = iter.next()
-            val baseKey: BaseKey = GroupMetadataManager.readMessageKey(ByteBuffer.wrap(record.key))
-            baseKey match {
-              case b: OffsetKey =>
-                try {
-                  val offsetAndMetadata: OffsetAndMetadata = GroupMetadataManager.readOffsetMessageValue(ByteBuffer.wrap(record.value))
-                  val gtp: GroupTopicPartition = b.key
+      debug("Consumer group committed offsets pulled: " + records.count)
+      if (0 != records.count) {
+        val iter = records.iterator()
+        while (iter.hasNext()) {
+          val record: ConsumerRecord[Array[Byte], Array[Byte]] = iter.next()
+          val baseKey: BaseKey = GroupMetadataManager.readMessageKey(ByteBuffer.wrap(record.key))
+          baseKey match {
+            case b: OffsetKey =>
+              try {
+                val offsetAndMetadata: OffsetAndMetadata = GroupMetadataManager.readOffsetMessageValue(ByteBuffer.wrap(record.value))
+                val gtp: GroupTopicPartition = b.key
 
-                  val existingCommittedOffsetMap: Option[OffsetAndMetadata] = committedOffsetMap.get(gtp)
+                val existingCommittedOffsetMap: Option[OffsetAndMetadata] = committedOffsetMap.get(gtp)
 
-                  // Update only if the new message brings a change in offset
-                  if (!existingCommittedOffsetMap.isDefined || existingCommittedOffsetMap.get.offset != offsetAndMetadata.offset) {
-                    val group: String = gtp.group
-                    val topic: String = gtp.topicPartition.topic
-                    val partition: Long = gtp.topicPartition.partition
-                    val offset: Long = offsetAndMetadata.offset
-                    debug(s"Updating committed offset: g:$group,t:$topic,p:$partition: $offset")
+                // Update only if the new message brings a change in offset
+                if (!existingCommittedOffsetMap.isDefined || existingCommittedOffsetMap.get.offset != offsetAndMetadata.offset) {
+                  val group: String = gtp.group
+                  val topic: String = gtp.topicPartition.topic
+                  val partition: Long = gtp.topicPartition.partition
+                  val offset: Long = offsetAndMetadata.offset
+                  debug(s"Updating committed offset: g:$group,t:$topic,p:$partition: $offset")
 
-                    committedOffsetMap += (gtp -> offsetAndMetadata)
-                  }
+                  committedOffsetMap += (gtp -> offsetAndMetadata)
                 }
-                catch {
-                  case e: Throwable =>
-                    error("Error occurred while reading consumer offset.", e)
-                }
+              }
+              catch {
+                case e: Throwable =>
+                  error("Error occurred while reading consumer offset.", e)
+              }
 
-              case _ => // do nothing with these other messages
-            }
+            case _ => // do nothing with these other messages
           }
         }
       }
@@ -209,62 +208,60 @@ object KafkaOffsetGetter extends Logging {
     val sleepOnDataRetrieval: Int = 10000
     var adminClient: AdminClient = null
 
-    Future {
-      while (true) {
-        try {
-          info("Retrieving consumer group overviews")
+    while (true) {
+      try {
+        info("Retrieving consumer group overviews")
 
-          if (null == adminClient) {
-            adminClient = createNewAdminClient(args)
-          }
-          val groupOverviews: Seq[GroupOverview] = adminClient.listAllConsumerGroupsFlattened()
+        if (null == adminClient) {
+          adminClient = createNewAdminClient(args)
+        }
+        val groupOverviews: Seq[GroupOverview] = adminClient.listAllConsumerGroupsFlattened()
 
-          val newTopicAndGroups: mutable.Set[TopicAndGroup] = mutable.HashSet()
-          val newClients: mutable.Set[ClientGroup] = mutable.HashSet()
-          val newActiveTopicPartitions: mutable.HashSet[TopicPartition] = mutable.HashSet()
+        val newTopicAndGroups: mutable.Set[TopicAndGroup] = mutable.HashSet()
+        val newClients: mutable.Set[ClientGroup] = mutable.HashSet()
+        val newActiveTopicPartitions: mutable.HashSet[TopicPartition] = mutable.HashSet()
 
-          groupOverviews.foreach((groupOverview: GroupOverview) => {
-            val groupId = groupOverview.groupId;
-            val consumerGroupSummary = adminClient.describeConsumerGroup(groupId)
+        groupOverviews.foreach((groupOverview: GroupOverview) => {
+          val groupId = groupOverview.groupId;
+          val consumerGroupSummary = adminClient.describeConsumerGroup(groupId)
 
-            consumerGroupSummary match {
-              case None =>
-              case Some(consumerGroupSummaryValue) =>
-                consumerGroupSummaryValue.foreach(consumerSummary => {
-                  val clientId = consumerSummary.clientId
-                  val clientHost = consumerSummary.clientHost
+          consumerGroupSummary match {
+            case None =>
+            case Some(consumerGroupSummaryValue) =>
+              consumerGroupSummaryValue.foreach(consumerSummary => {
+                val clientId = consumerSummary.clientId
+                val clientHost = consumerSummary.clientHost
 
-                  val topicPartitions: List[TopicPartition] = consumerSummary.assignment
+                val topicPartitions: List[TopicPartition] = consumerSummary.assignment
 
-                  topicPartitions.foreach(topicPartition => {
-                    if (!topicPartition.topic.startsWith("_")) {
-                      newActiveTopicPartitions += topicPartition
-                      newTopicAndGroups += TopicAndGroup(topicPartition.topic(), groupId)
-                    }
-                  })
-
-                  newClients += ClientGroup(groupId, clientId, clientHost, topicPartitions.toSet)
+                topicPartitions.foreach(topicPartition => {
+                  if (!topicPartition.topic.startsWith("_")) {
+                    newActiveTopicPartitions += topicPartition
+                    newTopicAndGroups += TopicAndGroup(topicPartition.topic(), groupId)
+                  }
                 })
-            }
-          })
 
-          activeTopicPartitions = newActiveTopicPartitions.toSet
-          topicAndGroups = newTopicAndGroups.toSet
-          clients = newClients.toSet
+                newClients += ClientGroup(groupId, clientId, clientHost, topicPartitions.toSet)
+              })
+          }
+        })
 
-          info("Retrieved consumer group overviews: " + groupOverviews.size)
-        }
-        catch {
-          case e: Throwable =>
-            error("Error occurred while retrieving consumer groups.", e)
-            if (null != adminClient) {
-              adminClient.close()
-              adminClient = null
-            }
-        }
+        activeTopicPartitions = newActiveTopicPartitions.toSet
+        topicAndGroups = newTopicAndGroups.toSet
+        clients = newClients.toSet
 
-        Thread.sleep(sleepOnDataRetrieval)
+        info("Retrieved consumer group overviews: " + groupOverviews.size)
       }
+      catch {
+        case e: Throwable =>
+          error("Error occurred while retrieving consumer groups.", e)
+          if (null != adminClient) {
+            adminClient.close()
+            adminClient = null
+          }
+      }
+
+      Thread.sleep(sleepOnDataRetrieval)
     }
   }
 
@@ -272,57 +269,56 @@ object KafkaOffsetGetter extends Logging {
     val sleepOnDataRetrieval: Int = 10000
     var topicPartitionOffsetGetter: KafkaConsumer[Array[Byte], Array[Byte]] = null;
 
-    Future {
-      while (true) {
-        try {
-          info("Retrieving topics/partition offsets")
+    while (true) {
+      try {
+        info("Retrieving topics/partition offsets")
 
-          if (null == topicPartitionOffsetGetter) {
-            val group: String = "KafkaOffsetMonitor-TopicPartOffsetGetter-" + System.currentTimeMillis()
-            topicPartitionOffsetGetter = createNewKafkaConsumer(args, group)
+        if (null == topicPartitionOffsetGetter) {
+          val group: String = "KafkaOffsetMonitor-TopicPartOffsetGetter-" + System.currentTimeMillis()
+          topicPartitionOffsetGetter = createNewKafkaConsumer(args, group)
+        }
+
+        info("Retrieving topics")
+        topicPartitionsMap = JavaConversions.mapAsScalaMap(topicPartitionOffsetGetter.listTopics).toMap.filter(!_._1.startsWith("_"))
+        info("Retrieved topics: " + topicPartitionsMap.size)
+
+        if (activeTopicPartitions.nonEmpty) {
+          info("Retrieving partition offsets for " + activeTopicPartitions.size + " partitions")
+
+          info("Assigning topicPartitionOffsetGetter to " + activeTopicPartitions.size + " partitions")
+          val f = Future {
+            topicPartitionOffsetGetter.assign(activeTopicPartitions)
           }
+          Await.result(f, kafkaClientRequestTimeout)
+          info("Seeking to the end of  " + activeTopicPartitions.size + " partitions")
+          topicPartitionOffsetGetter.seekToEnd(new util.ArrayList[TopicPartition]())
 
-          info("Retrieving topics")
-          topicPartitionsMap = JavaConversions.mapAsScalaMap(topicPartitionOffsetGetter.listTopics).toMap.filter(!_._1.startsWith("_"))
-          info("Retrieved topics: " + topicPartitionsMap.size )
+          val newTopicPartitionOffsetsMap: mutable.HashMap[TopicPartition, Long] = mutable.HashMap()
 
-          if (activeTopicPartitions.nonEmpty) {
-            info("Retrieving partition offsets for " + activeTopicPartitions.size + " partitions")
-
+          activeTopicPartitions.foreach(topicPartition => {
+            debug("Retrieving partition offsets for " + topicPartition.topic + " " + topicPartition.partition)
             val f = Future {
-              topicPartitionOffsetGetter.assign(activeTopicPartitions)
+              val parititionOffset = topicPartitionOffsetGetter.position(topicPartition)
+              newTopicPartitionOffsetsMap.put(topicPartition, parititionOffset)
             }
-            Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
+            Await.result(f, kafkaClientRequestTimeout)
+          })
 
-            topicPartitionOffsetGetter.seekToEnd(new util.ArrayList[TopicPartition]())
+          topicPartitionOffsetsMap = newTopicPartitionOffsetsMap.toMap
 
-            val newTopicPartitionOffsetsMap: mutable.HashMap[TopicPartition, Long] = mutable.HashMap()
-
-            activeTopicPartitions.foreach( topicPartition => {
-              val f = Future {
-                debug("Retrieving partition offsets for " + topicPartition.topic + " " + topicPartition.partition)
-                val parititionOffset = topicPartitionOffsetGetter.position(topicPartition)
-                newTopicPartitionOffsetsMap.put(topicPartition, parititionOffset)
-              }
-              Await.result(f, duration.pairIntToDuration(60, duration.SECONDS))
-            })
-
-            topicPartitionOffsetsMap = newTopicPartitionOffsetsMap.toMap
-
-            info("Retrieved partition offsets: " + activeTopicPartitions.size)
-          }
+          info("Retrieved partition offsets: " + activeTopicPartitions.size)
         }
-        catch {
-          case e: Throwable =>
-            error("Error occurred while retrieving topic partition offsets.", e)
-            if (null != topicPartitionOffsetGetter) {
-              topicPartitionOffsetGetter.close
-              topicPartitionOffsetGetter = null
-            }
-        }
-
-        Thread.sleep(sleepOnDataRetrieval)
       }
+      catch {
+        case e: Throwable =>
+          error("Error occurred while retrieving topic partition offsets.", e)
+          if (null != topicPartitionOffsetGetter) {
+            topicPartitionOffsetGetter.close
+            topicPartitionOffsetGetter = null
+          }
+      }
+
+      Thread.sleep(sleepOnDataRetrieval)
     }
   }
 
@@ -349,8 +345,8 @@ object KafkaOffsetGetter extends Logging {
 
     while (null == kafkaConsumer) {
       try {
-        info("Creating Kafka consumer " + group )
-        kafkaConsumer= new KafkaConsumer[Array[Byte], Array[Byte]](props)
+        info("Creating Kafka consumer " + group)
+        kafkaConsumer = new KafkaConsumer[Array[Byte], Array[Byte]](props)
       }
       catch {
         case e: Throwable =>
@@ -364,7 +360,7 @@ object KafkaOffsetGetter extends Logging {
       }
     }
 
-    info("Created Kafka consumer: " + group )
+    info("Created Kafka consumer: " + group)
     kafkaConsumer
   }
 
@@ -407,4 +403,5 @@ object KafkaOffsetGetter extends Logging {
   case class TopicAndGroup(topic: String, group: String)
 
   case class ClientGroup(group: String, clientId: String, clientHost: String, topicPartitions: Set[TopicPartition])
+
 }

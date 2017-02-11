@@ -22,12 +22,3 @@ libraryDependencies ++= Seq(
   "org.xerial" % "sqlite-jdbc" % "3.7.2",
   "org.mockito" % "mockito-all" % "1.10.19" % "test",
   "org.scalatest" %% "scalatest" % "2.2.6" % "test")
-
-assemblyMergeStrategy in assembly := {
-  case "about.html" => MergeStrategy.discard
-  case "log4j.properties" => MergeStrategy.discard
-  case x => {
-    val oldStrategy = (assemblyMergeStrategy in assembly).value
-    oldStrategy(x)
-  }
-}

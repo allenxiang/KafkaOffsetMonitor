@@ -4,10 +4,11 @@ import java.io.FileInputStream
 import java.lang.reflect.Constructor
 import java.net.URL
 import java.util.Properties
-import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
+import java.util.concurrent.{ExecutorService, Executors, ScheduledExecutorService, TimeUnit}
 
 import com.quantifind.kafka.OffsetGetter
 import com.quantifind.kafka.OffsetGetter.KafkaInfo
+import com.quantifind.kafka.core.KafkaOffsetGetter
 import com.quantifind.kafka.offsetapp.sqlite.SQLiteOffsetInfoReporter
 import com.quantifind.sumac.FieldArgs
 import com.quantifind.sumac.validation.Required
@@ -95,6 +96,8 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     reporters = createOffsetInfoReporters(args)
 
     schedule(args)
+
+    OffsetGetter.startGetters(args)
 
     def intent: Plan.Intent = {
       case GET(Path(Seg("group" :: Nil))) =>

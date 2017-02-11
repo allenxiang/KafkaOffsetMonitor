@@ -1,5 +1,6 @@
 package com.quantifind.kafka
 
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 import com.quantifind.kafka.OffsetGetter.{BrokerInfo, KafkaInfo, OffsetInfo}
@@ -9,6 +10,7 @@ import com.twitter.util.Time
 import kafka.utils.Logging
 
 import scala.collection._
+import scala.concurrent.{ExecutionContext, Future}
 
 case class Node(name: String, children: Seq[Node] = Seq())
 
@@ -128,17 +130,27 @@ trait OffsetGetter extends Logging {
 
 object OffsetGetter {
 
-  val kafkaOffsetListenerStarted: AtomicBoolean = new AtomicBoolean(false)
+  val kafkaOffsetGetter = new KafkaOffsetGetter
 
   def getInstance(args: OffsetGetterArgs): OffsetGetter = {
+    kafkaOffsetGetter
+  }
 
-    if (kafkaOffsetListenerStarted.compareAndSet(false, true)) {
-      KafkaOffsetGetter.startAdminClient(args)
-      KafkaOffsetGetter.startTopicPartitionOffsetGetter(args)
-      KafkaOffsetGetter.startCommittedOffsetListener(args)
-    }
+  def startGetters(args: OffsetGetterArgs) ={
+    val executor1 = Executors.newSingleThreadExecutor()
+    executor1.submit(new Runnable() {
+      def run() = KafkaOffsetGetter.startAdminClient(args)
+    })
 
-    new KafkaOffsetGetter
+    val executor2 = Executors.newSingleThreadExecutor()
+    executor2.submit(new Runnable() {
+      def run() = KafkaOffsetGetter.startTopicPartitionOffsetGetter(args)
+    })
+
+    val executor3 = Executors.newSingleThreadExecutor()
+    executor3.submit(new Runnable() {
+      def run() = KafkaOffsetGetter.startCommittedOffsetListener(args)
+    })
   }
 
   case class KafkaInfo(name: String, brokers: Seq[BrokerInfo], offsets: Seq[OffsetInfo])
