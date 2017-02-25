@@ -1,5 +1,4 @@
-name := "KafkaOffsetMonitor"
-version := "0.4.0-20170207"
+name := "kafka-offset-monitor"
 scalaVersion := "2.11.8"
 organization := "com.quantifind"
 
@@ -26,3 +25,20 @@ libraryDependencies ++= Seq(
   "io.prometheus" % "simpleclient_hotspot" % "0.0.20",
   "io.prometheus" % "simpleclient_common" % "0.0.20"
 )
+
+credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")
+
+publishPackArchiveTgz
+
+val nexusBaseUrl = System.getenv("nexusBaseUrl")
+val snapshotRepo = System.getenv("snapshotRepo")
+val releaseRepo = System.getenv("releaseRepo")
+
+publishTo := {
+  if (isSnapshot.value)
+    Some("Snapshot Repo" at nexusBaseUrl + snapshotRepo)
+  else
+    Some("Release Repo" at nexusBaseUrl + releaseRepo)
+}
+
+
