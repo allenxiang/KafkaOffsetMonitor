@@ -1,21 +1,20 @@
 package com.quantifind.kafka.offsetapp
 
-import java.io.FileInputStream
+import java.io.{FileInputStream, StringWriter, Writer}
 import java.lang.reflect.Constructor
-import java.net.URL
 import java.util.Properties
-import java.util.concurrent.{ExecutorService, Executors, ScheduledExecutorService, TimeUnit}
+import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 import com.quantifind.kafka.OffsetGetter
 import com.quantifind.kafka.OffsetGetter.KafkaInfo
-import com.quantifind.kafka.core.KafkaOffsetGetter
 import com.quantifind.kafka.offsetapp.sqlite.SQLiteOffsetInfoReporter
 import com.quantifind.sumac.FieldArgs
 import com.quantifind.sumac.validation.Required
 import com.quantifind.utils.UnfilteredWebApp
 import com.quantifind.utils.Utils.retryTask
 import com.twitter.util.Time
-import com.typesafe.config.ConfigFactory
+import io.prometheus.client.exporter.common.TextFormat
+import io.prometheus.client.{CollectorRegistry, Gauge}
 import kafka.utils.Logging
 import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
@@ -23,7 +22,7 @@ import org.json4s.{CustomSerializer, JInt, NoTypeHints}
 import org.reflections.Reflections
 import unfiltered.filter.Plan
 import unfiltered.request.{GET, Path, Seg}
-import unfiltered.response.{JsonContent, Ok, ResponseString}
+import unfiltered.response.{JsonContent, Ok, PlainTextContent, ResponseString}
 
 import scala.collection.mutable
 import scala.concurrent.duration._
@@ -60,6 +59,15 @@ class OWArgs extends OffsetGetterArgs with UnfilteredWebApp.Arguments {
   * Date: 1/23/14
   */
 object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
+
+  val topic_partition_offset: Gauge = Gauge.build()
+    .name("kafka_topic_partition_offset").help("kafka topic partition offset.")
+    .labelNames("topic", "partition").register();
+
+  val consumer_offset: Gauge = Gauge.build()
+    .name("kafka_consumer_offset").help("Total processed.")
+    .labelNames("topic", "partition", "consumer_group").register();
+
   implicit def funToRunnable(fun: () => Unit) = new Runnable() {
     def run() = fun()
   }
@@ -100,6 +108,10 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     OffsetGetter.startGetters(args)
 
     def intent: Plan.Intent = {
+      case GET(Path(Seg("health" :: Nil))) =>
+        PlainTextContent ~> ResponseString("ok")
+      case GET(Path(Seg("metrics" :: Nil))) =>
+        PlainTextContent ~> ResponseString(getMetrics())
       case GET(Path(Seg("group" :: Nil))) =>
         JsonContent ~> ResponseString(write(getGroups(args)))
       case GET(Path(Seg("group" :: group :: Nil))) =>
@@ -133,6 +145,17 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
         reporter.cleanupOldData()
       }))
     }, 0, TimeUnit.MINUTES.toMillis(10), TimeUnit.MILLISECONDS)
+  }
+
+  def getMetrics() = {
+    val writer: Writer = new StringWriter;
+    try {
+      TextFormat.write004(writer, CollectorRegistry.defaultRegistry.metricFamilySamples)
+      writer.flush
+    } finally {
+      writer.close
+    }
+    writer.toString
   }
 
   def reportOffsets(args: OWArgs) = withOG(args) {

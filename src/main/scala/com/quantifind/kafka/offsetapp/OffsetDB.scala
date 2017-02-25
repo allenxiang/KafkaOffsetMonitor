@@ -1,7 +1,5 @@
 package com.quantifind.kafka.offsetapp
 
-import java.util.concurrent.TimeUnit
-
 import com.quantifind.kafka.OffsetGetter.OffsetInfo
 import com.quantifind.kafka.offsetapp.OffsetDB.{DbOffsetInfo, OffsetHistory, OffsetPoints}
 import com.twitter.util.Time

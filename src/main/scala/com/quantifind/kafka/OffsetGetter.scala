@@ -1,7 +1,6 @@
 package com.quantifind.kafka
 
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 import com.quantifind.kafka.OffsetGetter.{BrokerInfo, KafkaInfo, OffsetInfo}
 import com.quantifind.kafka.core.KafkaOffsetGetter
@@ -10,7 +9,6 @@ import com.twitter.util.Time
 import kafka.utils.Logging
 
 import scala.collection._
-import scala.concurrent.{ExecutionContext, Future}
 
 case class Node(name: String, children: Seq[Node] = Seq())
 

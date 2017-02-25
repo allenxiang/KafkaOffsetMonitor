@@ -5,7 +5,7 @@ import java.util
 import java.util.{Arrays, Properties}
 
 import com.quantifind.kafka.OffsetGetter.{BrokerInfo, OffsetInfo}
-import com.quantifind.kafka.offsetapp.{OffsetGetterArgs, OffsetInfoReporter}
+import com.quantifind.kafka.offsetapp.{OffsetGetterArgs, OffsetGetterWeb, OffsetInfoReporter}
 import com.quantifind.kafka.{Node, OffsetGetter}
 import com.quantifind.utils.Utils.retryTask
 import com.twitter.util.Time
@@ -186,6 +186,7 @@ object KafkaOffsetGetter extends Logging {
                   val partition: Long = gtp.topicPartition.partition
                   val offset: Long = offsetAndMetadata.offset
                   debug(s"Updating committed offset: g:$group,t:$topic,p:$partition: $offset")
+                  OffsetGetterWeb.consumer_offset.labels(topic, partition.toString, group).set(offset)
 
                   committedOffsetMap += (gtp -> offsetAndMetadata)
                 }
@@ -299,6 +300,8 @@ object KafkaOffsetGetter extends Logging {
             debug("Retrieving partition offsets for " + topicPartition.topic + " " + topicPartition.partition)
             val f = Future {
               val parititionOffset = topicPartitionOffsetGetter.position(topicPartition)
+              OffsetGetterWeb.topic_partition_offset.labels(topicPartition.topic, topicPartition.partition.toString).set(parititionOffset)
+
               newTopicPartitionOffsetsMap.put(topicPartition, parititionOffset)
             }
             Await.result(f, kafkaClientRequestTimeout)
@@ -313,7 +316,7 @@ object KafkaOffsetGetter extends Logging {
         case e: Throwable =>
           error("Error occurred while retrieving topic partition offsets.", e)
           if (null != topicPartitionOffsetGetter) {
-            topicPartitionOffsetGetter.close
+            topicPartitionOffsetGetter.close()
             topicPartitionOffsetGetter = null
           }
       }
