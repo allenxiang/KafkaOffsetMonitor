@@ -226,12 +226,12 @@ object KafkaOffsetGetter extends Logging {
           val groupId = groupOverview.groupId;
           val consumerGroupSummary = adminClient.describeConsumerGroup(groupId)
 
-          consumerGroupSummary match {
+          consumerGroupSummary.consumers match {
             case None =>
             case Some(consumerGroupSummaryValue) =>
               consumerGroupSummaryValue.foreach(consumerSummary => {
                 val clientId = consumerSummary.clientId
-                val clientHost = consumerSummary.clientHost
+                val clientHost = consumerSummary.host
 
                 val topicPartitions: List[TopicPartition] = consumerSummary.assignment
 
