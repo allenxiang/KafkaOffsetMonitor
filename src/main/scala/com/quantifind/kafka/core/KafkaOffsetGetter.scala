@@ -280,7 +280,10 @@ object KafkaOffsetGetter extends Logging {
         }
 
         info("Retrieving topics")
-        topicPartitionsMap = JavaConversions.mapAsScalaMap(topicPartitionOffsetGetter.listTopics).toMap.filter(!_._1.startsWith("_"))
+        val f = Future {
+          topicPartitionsMap = JavaConversions.mapAsScalaMap(topicPartitionOffsetGetter.listTopics).toMap.filter(!_._1.startsWith("_"))
+        }
+        Await.result(f, kafkaClientRequestTimeout)
         info("Retrieved topics: " + topicPartitionsMap.size)
 
         if (activeTopicPartitions.nonEmpty) {
@@ -315,10 +318,8 @@ object KafkaOffsetGetter extends Logging {
       catch {
         case e: Throwable =>
           error("Error occurred while retrieving topic partition offsets.", e)
-          if (null != topicPartitionOffsetGetter) {
-            topicPartitionOffsetGetter.close()
-            topicPartitionOffsetGetter = null
-          }
+          // Couldn't close client sometimes. Exit and let systemd to restart the service.
+          System.exit(1)
       }
 
       Thread.sleep(sleepOnDataRetrieval)
