@@ -249,7 +249,7 @@ object KafkaOffsetGetter extends Logging {
                 })
             }
           } catch {
-            case e => warn(s"Failed to describe consumer group $groupId", e)
+            case e: Throwable => warn(s"Failed to describe consumer group $groupId. ${e.getMessage}")
           }
         })
 
