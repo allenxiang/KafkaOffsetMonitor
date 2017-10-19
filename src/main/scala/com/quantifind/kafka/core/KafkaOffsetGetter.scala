@@ -24,7 +24,6 @@ import scala.collection.{JavaConversions, _}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future, duration}
-import scala.util.{Failure, Try}
 
 /**
   * Created by rcasey on 11/16/2016.
@@ -227,30 +226,30 @@ object KafkaOffsetGetter extends Logging {
 
         groupOverviews.foreach((groupOverview: GroupOverview) => {
           val groupId = groupOverview.groupId
-          Try {
-          val consumerGroupSummary = adminClient.describeConsumerGroup(groupId)
+          try {
+            val consumerGroupSummary = adminClient.describeConsumerGroup(groupId)
 
-          consumerGroupSummary.consumers match {
-            case None =>
-            case Some(consumerGroupSummaryValue) =>
-              consumerGroupSummaryValue.foreach(consumerSummary => {
-                val clientId = consumerSummary.clientId
-                val clientHost = consumerSummary.host
+            consumerGroupSummary.consumers match {
+              case None =>
+              case Some(consumerGroupSummaryValue) =>
+                consumerGroupSummaryValue.foreach(consumerSummary => {
+                  val clientId = consumerSummary.clientId
+                  val clientHost = consumerSummary.host
 
-                val topicPartitions: List[TopicPartition] = consumerSummary.assignment
+                  val topicPartitions: List[TopicPartition] = consumerSummary.assignment
 
-                topicPartitions.foreach(topicPartition => {
-                  if (!topicPartition.topic.startsWith("_")) {
-                    newActiveTopicPartitions += topicPartition
-                    newTopicAndGroups += TopicAndGroup(topicPartition.topic(), groupId)
-                  }
+                  topicPartitions.foreach(topicPartition => {
+                    if (!topicPartition.topic.startsWith("_")) {
+                      newActiveTopicPartitions += topicPartition
+                      newTopicAndGroups += TopicAndGroup(topicPartition.topic(), groupId)
+                    }
+                  })
+
+                  newClients += ClientGroup(groupId, clientId, clientHost, topicPartitions.toSet)
                 })
-
-                newClients += ClientGroup(groupId, clientId, clientHost, topicPartitions.toSet)
-              })
             }
-          } match {
-            case Failure(e) => warn(s"Failed to describe consumer group $groupId", e)
+          } catch {
+            case e => warn(s"Failed to describe consumer group $groupId", e)
           }
         })
 
