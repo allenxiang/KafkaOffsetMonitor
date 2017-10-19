@@ -24,6 +24,7 @@ import scala.collection.{JavaConversions, _}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future, duration}
+import scala.util.{Failure, Try}
 
 /**
   * Created by rcasey on 11/16/2016.
@@ -226,6 +227,7 @@ object KafkaOffsetGetter extends Logging {
 
         groupOverviews.foreach((groupOverview: GroupOverview) => {
           val groupId = groupOverview.groupId
+          Try {
           val consumerGroupSummary = adminClient.describeConsumerGroup(groupId)
 
           consumerGroupSummary.consumers match {
@@ -246,6 +248,9 @@ object KafkaOffsetGetter extends Logging {
 
                 newClients += ClientGroup(groupId, clientId, clientHost, topicPartitions.toSet)
               })
+            }
+          } match {
+            case Failure(e) => warn(s"Failed to describe consumer group $groupId", e)
           }
         })
 
