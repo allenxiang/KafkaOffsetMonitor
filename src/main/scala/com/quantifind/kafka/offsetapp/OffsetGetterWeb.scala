@@ -62,11 +62,11 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
 
   val topic_partition_offset: Gauge = Gauge.build()
     .name("kafka_topic_partition_offset").help("kafka topic partition offset.")
-    .labelNames("topic", "partition").register();
+    .labelNames("topic", "partition").register()
 
   val consumer_offset: Gauge = Gauge.build()
     .name("kafka_consumer_offset").help("Total processed.")
-    .labelNames("topic", "partition", "consumer_group").register();
+    .labelNames("topic", "partition", "consumer_group").register()
 
   implicit def funToRunnable(fun: () => Unit) = new Runnable() {
     def run() = fun()
@@ -147,13 +147,13 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     }, 0, TimeUnit.MINUTES.toMillis(10), TimeUnit.MILLISECONDS)
   }
 
-  def getMetrics() = {
-    val writer: Writer = new StringWriter;
+  def getMetrics(): String = {
+    val writer: Writer = new StringWriter
     try {
       TextFormat.write004(writer, CollectorRegistry.defaultRegistry.metricFamilySamples)
-      writer.flush
+      writer.flush()
     } finally {
-      writer.close
+      writer.close()
     }
     writer.toString
   }
