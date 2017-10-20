@@ -20,10 +20,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.slick" %% "slick" % "2.1.0",
   "org.xerial" % "sqlite-jdbc" % "3.7.2",
   "org.mockito" % "mockito-all" % "1.10.19" % "test",
-  "org.scalatest" %% "scalatest" % "2.2.6" % "test",
-  "io.prometheus" % "simpleclient_dropwizard" % "0.0.20",
-  "io.prometheus" % "simpleclient_hotspot" % "0.0.20",
-  "io.prometheus" % "simpleclient_common" % "0.0.20"
+  "org.scalatest" %% "scalatest" % "2.2.6" % "test"
 )
 
 credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")

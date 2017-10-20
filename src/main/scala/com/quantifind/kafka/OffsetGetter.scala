@@ -135,7 +135,7 @@ object OffsetGetter {
   }
 
   def startGetters(args: OffsetGetterArgs) ={
-    val executor = Executors.newFixedThreadPool(3)
+    val executor = Executors.newFixedThreadPool(2)
 
     executor.submit(new Runnable() {
       def run() = KafkaOffsetGetter.startAdminClient(args)
@@ -143,10 +143,6 @@ object OffsetGetter {
 
     executor.submit(new Runnable() {
       def run() = KafkaOffsetGetter.startTopicPartitionOffsetGetter(args)
-    })
-
-    executor.submit(new Runnable() {
-      def run() = KafkaOffsetGetter.startCommittedOffsetListener(args)
     })
   }
 
