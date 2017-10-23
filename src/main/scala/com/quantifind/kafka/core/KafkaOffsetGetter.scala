@@ -128,14 +128,81 @@ class KafkaOffsetGetter extends OffsetGetter {
 
 object KafkaOffsetGetter extends Logging {
   val kafkaClientRequestTimeout: Duration = duration.pairIntToDuration(10, duration.SECONDS)
+  val committedOffsetMap: concurrent.Map[GroupTopicPartition, OffsetAndMetadata] = concurrent.TrieMap()
 
   //For these vars, we swap the whole object when update is needed. Should be thread safe.
-  var committedOffsetMap: immutable.Map[GroupTopicPartition, OffsetAndMetadata] = immutable.HashMap()
   var topicAndGroups: immutable.Set[TopicAndGroup] = immutable.HashSet()
   var clients: immutable.Set[ClientGroup] = immutable.HashSet()
   var activeTopicPartitions: immutable.Set[TopicPartition] = immutable.HashSet()
   var topicPartitionOffsetsMap: immutable.Map[TopicPartition, Long] = immutable.HashMap()
   var topicPartitionsMap: immutable.Map[String, util.List[PartitionInfo]] = immutable.HashMap()
+
+  def startCommittedOffsetListener(args: OffsetGetterArgs): Unit = {
+    var offsetConsumer: KafkaConsumer[Array[Byte], Array[Byte]] = null
+    val consumerOffsetTopic = "__consumer_offsets"
+
+    while (null == offsetConsumer) {
+      info("Creating new Kafka Client to get consumer group committed offsets")
+
+      val group: String = "kafka-offset-getter-client-" + System.currentTimeMillis
+      offsetConsumer = createNewKafkaConsumer(args, group)
+
+      try {
+        val f = Future {
+          offsetConsumer.subscribe(util.Arrays.asList(consumerOffsetTopic))
+        }
+        Await.result(f, kafkaClientRequestTimeout)
+
+        info("Subscribed to " + consumerOffsetTopic)
+      }
+      catch {
+        case e: Throwable =>
+          error("Error subscribing to consumer groups.", e)
+          offsetConsumer.close()
+          offsetConsumer = null
+      }
+    }
+
+    while (true) {
+      debug("Pulling consumer group committed offsets")
+      val records: ConsumerRecords[Array[Byte], Array[Byte]] = offsetConsumer.poll(100)
+
+      debug("Consumer group committed offsets pulled: " + records.count)
+      if (0 != records.count) {
+        val iter = records.iterator()
+        while (iter.hasNext) {
+          val record: ConsumerRecord[Array[Byte], Array[Byte]] = iter.next()
+          val baseKey: BaseKey = GroupMetadataManager.readMessageKey(ByteBuffer.wrap(record.key))
+          baseKey match {
+            case b: OffsetKey =>
+              try {
+                val offsetAndMetadata: OffsetAndMetadata = GroupMetadataManager.readOffsetMessageValue(ByteBuffer.wrap(record.value))
+                val gtp: GroupTopicPartition = b.key
+
+                val existingCommittedOffsetMap: Option[OffsetAndMetadata] = committedOffsetMap.get(gtp)
+
+                // Update only if the new message brings a change in offset
+                if (existingCommittedOffsetMap.isEmpty || existingCommittedOffsetMap.get.offset != offsetAndMetadata.offset) {
+                  val group: String = gtp.group
+                  val topic: String = gtp.topicPartition.topic
+                  val partition: Int = gtp.topicPartition.partition
+                  val offset: Long = offsetAndMetadata.offset
+                  debug(s"Updating committed offset: g:$group,t:$topic,p:$partition: $offset")
+
+                  committedOffsetMap += (gtp -> offsetAndMetadata)
+                }
+              }
+              catch {
+                case e: Throwable =>
+                  error("Error occurred while reading consumer offset.", e)
+              }
+
+            case _ => // do nothing with these other messages
+          }
+        }
+      }
+    }
+  }
 
   // Retrieve ConsumerGroup, Consumer, Topic, and Partition information
   def startAdminClient(args: OffsetGetterArgs): Unit = {
@@ -155,7 +222,6 @@ object KafkaOffsetGetter extends Logging {
         val newTopicAndGroups: mutable.Set[TopicAndGroup] = mutable.HashSet()
         val newClients: mutable.Set[ClientGroup] = mutable.HashSet()
         val newActiveTopicPartitions: mutable.HashSet[TopicPartition] = mutable.HashSet()
-        val newCommittedOffsetMap: mutable.Map[GroupTopicPartition, OffsetAndMetadata] = mutable.HashMap()
 
         groupOverviews.foreach((groupOverview: GroupOverview) => {
           val groupId = groupOverview.groupId
@@ -182,22 +248,13 @@ object KafkaOffsetGetter extends Logging {
                 })
             }
           } catch {
-            case e: Throwable => warn(s"Failed to describe consumer group $groupId. ${e.getMessage}")
-          }
-
-          try {
-            adminClient.listGroupOffsets(groupId).foreach { case (topicPartition, offset) =>
-              newCommittedOffsetMap.put(GroupTopicPartition(groupId, topicPartition), OffsetAndMetadata(offset))
-            }
-          } catch {
-            case e: Throwable => warn(s"Failed to list offsets for consumer group $groupId. ${e.getMessage}")
+            case e: Throwable => warn(s"Failed to describe consumer group $groupId", e)
           }
         })
 
         activeTopicPartitions = newActiveTopicPartitions.toSet
         topicAndGroups = newTopicAndGroups.toSet
         clients = newClients.toSet
-        committedOffsetMap = newCommittedOffsetMap.toMap
 
         info("Retrieved consumer group overviews: " + groupOverviews.size)
       }
